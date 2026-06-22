@@ -29,6 +29,7 @@ use worktrunk::config::{Approvals, ProjectConfig, UserConfig};
 use worktrunk::git::{
     BranchDeletionMode, IntegrationReason, RefSnapshot, Repository, WorktreeInfo,
 };
+use worktrunk::shell_exec::Cmd;
 use worktrunk::path::format_path_for_display;
 use worktrunk::styling::{
     eprintln, format_with_gutter, hint_message, info_message, println, success_message,
@@ -1308,6 +1309,17 @@ pub fn step_prune(
             eprintln!("{}", hint_message(block.headline));
             eprintln!("{}", format_with_gutter(&block.body, None));
         }
+    }
+
+    // Best-effort: prune stale submodule worktree metadata after all
+    // removals complete. Each individual removal also prunes this in
+    // the output handler, but the loop-level cleanup catches any that
+    // were skipped (approval, age) or removal-less branch-only prunes.
+    if let Ok(Some(primary_path)) = repo.primary_worktree() {
+        let _ = Cmd::new("git")
+            .args(["submodule", "foreach", "--recursive", "git worktree prune"])
+            .current_dir(&primary_path)
+            .run();
     }
 
     Ok(())
