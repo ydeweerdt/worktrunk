@@ -2135,23 +2135,25 @@ fn apply_submodule_dwim(
         let gitlink = submodules::gitlink_commit(repo, &treeish, &record.path);
         match &gitlink {
             Ok(sha) => {
-                submodules::preflight_check(&wt, &record.path, &record.name, sha)?;
+                submodules::preflight_check(repo, &record.name, &record.path, sha)?;
             }
             Err(_) => continue, // Not a submodule at this tree
         }
     }
 
-    // Apply DWIM to each initialized submodule
+    // Apply DWIM to each submodule
     for record in &records {
         let gitlink = match submodules::gitlink_commit(repo, &treeish, &record.path) {
             Ok(sha) => sha,
             Err(_) => continue,
         };
-        let dwim = match submodules::resolve_dwim(&wt, &record.path, dwim_branch, &gitlink) {
+        let dwim = match submodules::resolve_dwim(repo, &record.name, dwim_branch, &gitlink)
+        {
             Ok(d) => d,
             Err(_) => continue,
         };
-        let _prev = submodules::apply_dwim(&wt, &record.path, &dwim)?;
+        let sub_wt_path = wt.path().join(&record.path);
+        let _prev = submodules::apply_dwim(repo, &record.name, &sub_wt_path, &dwim)?;
     }
 
     Ok(())

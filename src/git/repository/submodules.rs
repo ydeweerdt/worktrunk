@@ -4,6 +4,7 @@
 //! resolving the DWIM branch for a submodule, and gitlink commit lookup.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use anyhow::{Context, bail};
 
@@ -159,9 +160,10 @@ pub fn gitlink_commit(repo: &Repository, treeish: &str, sub_path: &str) -> anyho
     }
 }
 
-/// Resolve the DWIM branch for a submodule within a worktree.
+/// Resolve the DWIM branch for a submodule.
 ///
-/// Applies the three-rule priority:
+/// Applies the three-rule priority against the submodule's **shared** gitdir
+/// (`.git/modules/<name>/`), so the main worktree's checkout is never touched:
 /// 1. If a local branch `<parent_branch>` exists → checkout as-is.
 /// 2. If a local remote-tracking ref `origin/<parent_branch>` exists → create
 ///    local branch tracking the remote ref.
@@ -169,21 +171,24 @@ pub fn gitlink_commit(repo: &Repository, treeish: &str, sub_path: &str) -> anyho
 ///
 /// All checks use local refs only — no network access.
 pub fn resolve_dwim(
-    wt: &WorkingTree<'_>,
-    sub_path: &str,
+    repo: &Repository,
+    sub_name: &str,
     parent_branch: &str,
     gitlink_hash: &str,
 ) -> anyhow::Result<DwimResult> {
+    let modules_gitdir = repo.git_common_dir().join("modules").join(sub_name);
+    let gitdir_str = modules_gitdir.to_string_lossy();
+
     // Rule 1: local branch exists
-    let local_exists = wt
-        .run_command_in_submodule(
-            sub_path,
-            &[
-                "rev-parse",
-                "--verify",
-                &format!("refs/heads/{}", parent_branch),
-            ],
-        )
+    let local_exists = Cmd::new("git")
+        .args([
+            "--git-dir",
+            gitdir_str.as_ref(),
+            "rev-parse",
+            "--verify",
+            &format!("refs/heads/{}", parent_branch),
+        ])
+        .run()
         .is_ok();
 
     if local_exists {
@@ -192,8 +197,15 @@ pub fn resolve_dwim(
 
     // Rule 2: remote-tracking ref exists locally
     let remote_ref = format!("refs/remotes/origin/{}", parent_branch);
-    let remote_exists = wt
-        .run_command_in_submodule(sub_path, &["rev-parse", "--verify", &remote_ref])
+    let remote_exists = Cmd::new("git")
+        .args([
+            "--git-dir",
+            gitdir_str.as_ref(),
+            "rev-parse",
+            "--verify",
+            &remote_ref,
+        ])
+        .run()
         .is_ok();
 
     if remote_exists {
@@ -212,56 +224,16 @@ pub fn resolve_dwim(
 
 /// Pre-flight check before applying submodule DWIM.
 ///
-/// Returns an error describing the first blocking condition found.
-///
-/// Checks:
-/// 1. Links `submodule_dir/.git` to the shared modules gitdir if absent
-/// 2. Verifies the gitlink commit exists in the submodule's object store
-///
-/// We deliberately skip the "clean working tree" check because the working tree
-/// in a freshly created linked worktree contains gitlink tree blobs, not the
-/// actual submodule checkout — `apply_dwim` will switch to the correct branch.
-/// Clean-tree enforcement for the common case (submodule was already checked
-/// out) would produce false positives on new worktrees.
+/// Verifies the gitlink commit exists in the submodule's object store.
+/// The submodule's `.git` file will be created by `git worktree add`
+/// in the apply step — we only validate that the object is reachable.
 pub fn preflight_check(
-    wt: &WorkingTree<'_>,
-    sub_path: &str,
+    repo: &Repository,
     sub_name: &str,
+    sub_path: &str,
     gitlink_hash: &str,
 ) -> anyhow::Result<()> {
-    let submodule_dir = wt.path().join(sub_path);
-
-    // Check 1: link submodule .git to the shared modules gitdir if absent.
-    // We do NOT use `git submodule init` because it creates a per-worktree
-    // gitdir (under .git/worktrees/<name>/modules/) that is empty on fresh
-    // linked worktrees, causing false "missing commit" errors.
-    if !submodule_dir.join(".git").exists() {
-        let shared_gitdir = wt
-            .repo()
-            .git_common_dir()
-            .join("modules")
-            .join(sub_name);
-        std::fs::write(
-            submodule_dir.join(".git"),
-            format!("gitdir: {}\n", shared_gitdir.display()),
-        )
-        .with_context(|| {
-            format!(
-                "Failed to create .git link for submodule '{}'",
-                sub_path
-            )
-        })?;
-    }
-
-    // Check 2: verify the gitlink commit exists in the submodule's object store.
-    // Run directly against the shared modules gitdir — don't rely on the
-    // submodule's .git file (may not be resolvable from a freshly-created
-    // linked worktree's context).
-    let modules_gitdir = wt
-        .repo()
-        .git_common_dir()
-        .join("modules")
-        .join(sub_name);
+    let modules_gitdir = repo.git_common_dir().join("modules").join(sub_name);
     let gitdir_str = modules_gitdir.to_string_lossy();
     if Cmd::new("git")
         .args([
@@ -310,45 +282,117 @@ pub fn initialized_submodule_names(
     Ok(result)
 }
 
-/// Apply a DWIM result to a submodule within a worktree.
+/// Apply a DWIM result by creating a linked worktree in the submodule.
 ///
-/// Runs the appropriate git command in the submodule directory.
-/// Returns the previous HEAD commit SHA for rollback purposes.
+/// Uses `git --git-dir=<modules>/<name> worktree add <path> <branch>` so the
+/// main worktree's submodule checkout is never touched — the new parent
+/// worktree gets its own submodule worktree linked back to the shared gitdir.
 pub fn apply_dwim(
-    wt: &WorkingTree<'_>,
-    sub_path: &str,
+    repo: &Repository,
+    sub_name: &str,
+    worktree_path: &Path,
     result: &DwimResult,
 ) -> anyhow::Result<String> {
-    // Snapshot current HEAD before any changes
-    let prev_head = wt
-        .run_command_in_submodule(sub_path, &["rev-parse", "HEAD"])
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
+    let modules_gitdir = repo.git_common_dir().join("modules").join(sub_name);
+    let gitdir_str = modules_gitdir.to_string_lossy();
+    let wt_path_str = worktree_path.to_string_lossy();
+
+    // The submodule directory was populated as a gitlink tree entry by the
+    // parent `git worktree add`. Remove it so `git worktree add` can create a
+    // fresh submodule checkout without --force.
+    if worktree_path.exists() {
+        std::fs::remove_dir_all(worktree_path)
+            .with_context(|| format!("Failed to clean submodule directory '{}'", sub_name))?;
+    }
 
     match result {
         DwimResult::CheckoutLocal(branch) => {
-            wt.run_command_in_submodule(sub_path, &["switch", branch])?;
+            Cmd::new("git")
+                .args([
+                    "--git-dir",
+                    gitdir_str.as_ref(),
+                    "worktree",
+                    "add",
+                    wt_path_str.as_ref(),
+                    branch,
+                ])
+                .run()
+                .with_context(|| {
+                    format!(
+                        "Failed to add submodule worktree '{}' for branch '{}'",
+                        sub_name, branch
+                    )
+                })?;
         }
         DwimResult::CreateFromRemote(branch, remote_ref) => {
-            wt.run_command_in_submodule(
-                sub_path,
-                &["switch", "-c", branch, remote_ref],
-            )?;
-            // Unset upstream to prevent accidental pushes to the remote branch
-            let _ = wt.run_command_in_submodule(
-                sub_path,
-                &["branch", "--unset-upstream", "--", branch],
-            );
+            Cmd::new("git")
+                .args([
+                    "--git-dir",
+                    gitdir_str.as_ref(),
+                    "branch",
+                    branch,
+                    remote_ref,
+                ])
+                .run()
+                .with_context(|| {
+                    format!(
+                        "Failed to create branch '{}' in submodule '{}'",
+                        branch, sub_name
+                    )
+                })?;
+            Cmd::new("git")
+                .args([
+                    "--git-dir",
+                    gitdir_str.as_ref(),
+                    "worktree",
+                    "add",
+                    wt_path_str.as_ref(),
+                    branch,
+                ])
+                .run()
+                .with_context(|| {
+                    format!(
+                        "Failed to add submodule worktree '{}' for branch '{}'",
+                        sub_name, branch
+                    )
+                })?;
         }
         DwimResult::CreateFromGitlink(branch, commit) => {
-            wt.run_command_in_submodule(
-                sub_path,
-                &["switch", "-c", branch, commit],
-            )?;
+            Cmd::new("git")
+                .args([
+                    "--git-dir",
+                    gitdir_str.as_ref(),
+                    "branch",
+                    branch,
+                    commit,
+                ])
+                .run()
+                .with_context(|| {
+                    format!(
+                        "Failed to create branch '{}' in submodule '{}'",
+                        branch, sub_name
+                    )
+                })?;
+            Cmd::new("git")
+                .args([
+                    "--git-dir",
+                    gitdir_str.as_ref(),
+                    "worktree",
+                    "add",
+                    wt_path_str.as_ref(),
+                    branch,
+                ])
+                .run()
+                .with_context(|| {
+                    format!(
+                        "Failed to add submodule worktree '{}' for branch '{}'",
+                        sub_name, branch
+                    )
+                })?;
         }
     }
 
-    Ok(prev_head)
+    Ok(String::new())
 }
 
 #[cfg(test)]
