@@ -2138,7 +2138,7 @@ fn apply_submodule_dwim(
         let gitlink = submodules::gitlink_commit(repo, &treeish, &record.path);
         match &gitlink {
             Ok(sha) => {
-                submodules::preflight_check(&wt, &record.path, dwim_branch, sha)?;
+                submodules::preflight_check(&wt, &record.path, &record.name, sha)?;
             }
             Err(_) => continue, // Not a submodule at this tree
         }

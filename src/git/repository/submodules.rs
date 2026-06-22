@@ -213,29 +213,65 @@ pub fn resolve_dwim(
 /// Pre-flight check before applying submodule DWIM.
 ///
 /// Returns an error describing the first blocking condition found.
-/// Checks are ordered by likelihood and cost:
-/// 1. Uninitialized submodule (repo dir doesn't exist locally)
-/// 2. Missing gitlink commit in submodule (for Rule 3 candidates)
-/// 3. Branch already active / checkout would fail
-/// 4. Directory path conflicts
+///
+/// Checks:
+/// 1. Links `submodule_dir/.git` to the shared modules gitdir if absent
+/// 2. Verifies the gitlink commit exists in the submodule's object store
+///
+/// We deliberately skip the "clean working tree" check because the working tree
+/// in a freshly created linked worktree contains gitlink tree blobs, not the
+/// actual submodule checkout — `apply_dwim` will switch to the correct branch.
+/// Clean-tree enforcement for the common case (submodule was already checked
+/// out) would produce false positives on new worktrees.
 pub fn preflight_check(
     wt: &WorkingTree<'_>,
     sub_path: &str,
-    _parent_branch: &str,
+    sub_name: &str,
     gitlink_hash: &str,
 ) -> anyhow::Result<()> {
     let submodule_dir = wt.path().join(sub_path);
 
-    // Check 1: submodule is initialized — auto-init if needed
+    // Check 1: link submodule .git to the shared modules gitdir if absent.
+    // We do NOT use `git submodule init` because it creates a per-worktree
+    // gitdir (under .git/worktrees/<name>/modules/) that is empty on fresh
+    // linked worktrees, causing false "missing commit" errors.
     if !submodule_dir.join(".git").exists() {
-        wt.run_command(&["submodule", "init", "--", sub_path])
-            .with_context(|| format!("Failed to initialize submodule '{}'", sub_path))?;
+        let shared_gitdir = wt
+            .repo()
+            .git_common_dir()
+            .join("modules")
+            .join(sub_name);
+        std::fs::write(
+            submodule_dir.join(".git"),
+            format!("gitdir: {}\n", shared_gitdir.display()),
+        )
+        .with_context(|| {
+            format!(
+                "Failed to create .git link for submodule '{}'",
+                sub_path
+            )
+        })?;
     }
 
-    // Check 2: missing gitlink commit (relevant for Rule 3)
-    // Fast check: `git cat-file -t <sha>` succeeds if the object exists
-    if wt
-        .run_command_in_submodule(sub_path, &["cat-file", "-t", gitlink_hash])
+    // Check 2: verify the gitlink commit exists in the submodule's object store.
+    // Run directly against the shared modules gitdir — don't rely on the
+    // submodule's .git file (may not be resolvable from a freshly-created
+    // linked worktree's context).
+    let modules_gitdir = wt
+        .repo()
+        .git_common_dir()
+        .join("modules")
+        .join(sub_name);
+    let gitdir_str = modules_gitdir.to_string_lossy();
+    if Cmd::new("git")
+        .args([
+            "--git-dir",
+            gitdir_str.as_ref(),
+            "cat-file",
+            "-t",
+            gitlink_hash,
+        ])
+        .run()
         .is_err()
     {
         bail!(
@@ -243,19 +279,6 @@ pub fn preflight_check(
              Run 'git fetch --recurse-submodules' first.",
             sub_path,
             gitlink_hash
-        );
-    }
-
-    // Check 3: verify the branch switch would work
-    // Quick sanity: check if the submodule has a clean working tree
-    if wt
-        .run_command_in_submodule(sub_path, &["status", "--porcelain"])
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false)
-    {
-        bail!(
-            "Submodule '{}' has uncommitted changes. Commit or stash them first.",
-            sub_path
         );
     }
 
