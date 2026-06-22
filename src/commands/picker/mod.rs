@@ -2188,7 +2188,6 @@ pub fn handle_picker(
             execute,
             execute_args,
             shell_integration_binary: None,
-            init: false,
             no_recurse_submodules: false,
         }
         .run()?;

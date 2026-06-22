@@ -149,8 +149,7 @@ each submodule is resolved using the same DWIM rules as the parent:
 2. **Remote-tracking branch exists** — creates a local branch tracking the remote ref
 3. **Neither exists** — creates a new branch from the parent's gitlink commit
 
-Use `--no-recurse-submodules` to skip all submodule operations. Use `--init`
-to auto-initialize uninitialized submodules.
+Use `--no-recurse-submodules` to skip all submodule operations.
 
 ## Command reference
 
@@ -216,9 +215,6 @@ Options:
 
           Hooks still run normally. Useful when hooks handle navigation (e.g., tmux workflows) or
           for CI/automation. Use --cd to override.
-
-      --init
-          Initialize uninitialized submodules before switching
 
       --no-recurse-submodules
           Skip submodule branch resolution

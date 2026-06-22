@@ -223,24 +223,13 @@ pub fn preflight_check(
     sub_path: &str,
     _parent_branch: &str,
     gitlink_hash: &str,
-    allow_init: bool,
 ) -> anyhow::Result<()> {
     let submodule_dir = wt.path().join(sub_path);
 
-    // Check 1: submodule is initialized
+    // Check 1: submodule is initialized — auto-init if needed
     if !submodule_dir.join(".git").exists() {
-        if allow_init {
-            wt.run_command(&["submodule", "init", "--", sub_path])
-                .with_context(|| {
-                    format!("Failed to initialize submodule '{}'", sub_path)
-                })?;
-        } else {
-            bail!(
-                "Submodule '{}' is not initialized. Use --init to auto-initialize, \
-                 or run 'git submodule init' first.",
-                sub_path
-            );
-        }
+        wt.run_command(&["submodule", "init", "--", sub_path])
+            .with_context(|| format!("Failed to initialize submodule '{}'", sub_path))?;
     }
 
     // Check 2: missing gitlink commit (relevant for Rule 3)

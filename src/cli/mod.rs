@@ -428,10 +428,6 @@ pub(crate) struct SwitchArgs {
     #[arg(long, overrides_with = "no_cd", hide = true)]
     pub(crate) cd: bool,
 
-    /// Initialize uninitialized submodules before switching
-    #[arg(long, requires = "branch")]
-    pub(crate) init: bool,
-
     /// Skip submodule branch resolution
     #[arg(long = "no-recurse-submodules", requires = "branch")]
     pub(crate) no_recurse_submodules: bool,
@@ -770,8 +766,7 @@ each submodule is resolved using the same DWIM rules as the parent:
 2. **Remote-tracking branch exists** — creates a local branch tracking the remote ref
 3. **Neither exists** — creates a new branch from the parent's gitlink commit
 
-Use `--no-recurse-submodules` to skip all submodule operations. Use `--init`
-to auto-initialize uninitialized submodules.
+Use `--no-recurse-submodules` to skip all submodule operations.
 
 ## See also
 

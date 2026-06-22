@@ -84,9 +84,6 @@ Usage: [1m[36mwt switch[0m [36m[OPTIONS][0m [36m[BRANCH][0m [1m[36m[--
           
           Hooks still run normally. Useful when hooks handle navigation (e.g., tmux workflows) or for CI/automation. Use --cd to override.[0m
 
-      [1m[36m--init[0m
-          Initialize uninitialized submodules before switching
-
       [1m[36m--no-recurse-submodules[0m
           Skip submodule branch resolution
 
@@ -269,8 +266,7 @@ each submodule is resolved using the same DWIM rules as the parent:
 2. [1mRemote-tracking branch exists[0m — creates a local branch tracking the remote ref
 3. [1mNeither exists[0m — creates a new branch from the parent's gitlink commit
 
-Use [2m--no-recurse-submodules[0m to skip all submodule operations. Use [2m--init[0m
-to auto-initialize uninitialized submodules.
+Use [2m--no-recurse-submodules[0m to skip all submodule operations.
 
 [1m[32mSee also[0m
 

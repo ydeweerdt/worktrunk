@@ -1342,7 +1342,6 @@ struct SwitchOptions<'a> {
     change_dir: Option<bool>,
     verify: bool,
     format: crate::cli::SwitchFormat,
-    init: bool,
     no_recurse_submodules: bool,
 }
 
@@ -1588,8 +1587,6 @@ pub(crate) struct SwitchPipeline<'a> {
     /// Binary name for the shell-integration offer. `Some` only on the argument
     /// path; the picker does not offer shell integration.
     pub shell_integration_binary: Option<&'a str>,
-    /// Run `git submodule update --init --recursive` after creating the worktree.
-    pub init: bool,
     /// Skip submodule DWIM even when submodules are present.
     pub no_recurse_submodules: bool,
 }
@@ -1614,7 +1611,6 @@ impl SwitchPipeline<'_> {
             execute,
             execute_args,
             shell_integration_binary,
-            init,
             no_recurse_submodules,
         } = self;
 
@@ -1678,7 +1674,7 @@ impl SwitchPipeline<'_> {
         if let SwitchResult::Created { path, base_branch, .. } = &result
             && !no_recurse_submodules
         {
-            apply_submodule_dwim(repo, path, branch_info.branch.as_deref(), base_branch.as_deref(), init)?;
+            apply_submodule_dwim(repo, path, branch_info.branch.as_deref(), base_branch.as_deref())?;
         }
 
 
@@ -1837,7 +1833,6 @@ fn run_switch(
         change_dir: change_dir_flag,
         verify,
         format,
-        init,
         no_recurse_submodules,
     } = opts;
 
@@ -1877,7 +1872,6 @@ fn run_switch(
         execute,
         execute_args,
         shell_integration_binary: Some(binary_name),
-        init,
         no_recurse_submodules,
     }
     .run()
@@ -1926,7 +1920,6 @@ pub fn handle_switch_command(args: SwitchArgs, yes: bool) -> anyhow::Result<()> 
                     change_dir: change_dir_flag,
                     verify,
                     format: args.format,
-                    init: args.init,
                     no_recurse_submodules: args.no_recurse_submodules,
                 },
                 &mut config,
@@ -2125,7 +2118,6 @@ fn apply_submodule_dwim(
     path: &Path,
     parent_branch: Option<&str>,
     base_branch: Option<&str>,
-    init: bool,
 ) -> anyhow::Result<()> {
     let parent_branch = parent_branch.unwrap_or("");
     let dwim_branch = base_branch.unwrap_or(parent_branch);
@@ -2146,7 +2138,7 @@ fn apply_submodule_dwim(
         let gitlink = submodules::gitlink_commit(repo, &treeish, &record.path);
         match &gitlink {
             Ok(sha) => {
-                submodules::preflight_check(&wt, &record.path, dwim_branch, sha, init)?;
+                submodules::preflight_check(&wt, &record.path, dwim_branch, sha)?;
             }
             Err(_) => continue, // Not a submodule at this tree
         }
