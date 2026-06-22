@@ -300,6 +300,7 @@ fn handle_step_command(
             target,
             no_ff,
             format,
+            recurse_submodules,
             ..
         } => {
             let result = if no_ff {
@@ -307,7 +308,12 @@ fn handle_step_command(
                 let current_branch = repo.require_current_branch("step push --no-ff")?;
                 handle_no_ff_merge(target.as_deref(), None, &current_branch)?
             } else {
-                handle_push(target.as_deref(), PushKind::Standalone, None)?
+                handle_push(
+                    target.as_deref(),
+                    PushKind::Standalone,
+                    None,
+                    recurse_submodules.as_deref(),
+                )?
             };
             if format == SwitchFormat::Json {
                 let PushResult {

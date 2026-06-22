@@ -351,6 +351,7 @@ pub fn handle_push(
     target: Option<&str>,
     kind: PushKind,
     operations: Option<MergeOperations>,
+    recurse_submodules: Option<&str>,
 ) -> anyhow::Result<PushResult> {
     let mut ctx = MergeContext::prepare(target, operations)?;
 
@@ -360,11 +361,12 @@ pub fn handle_push(
     let git_common_dir = ctx.repo.git_common_dir();
     let git_common_dir_str = git_common_dir.to_string_lossy();
     let push_target = format!("HEAD:{}", ctx.target_branch);
+    let recurse = recurse_submodules.unwrap_or("no");
 
     ctx.repo
         .run_command(&[
             "push",
-            "--recurse-submodules=no",
+            &format!("--recurse-submodules={}", recurse),
             "--receive-pack=git -c receive.denyCurrentBranch=updateInstead receive-pack",
             git_common_dir_str.as_ref(),
             &push_target,

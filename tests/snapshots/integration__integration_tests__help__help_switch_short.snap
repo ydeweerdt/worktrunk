@@ -43,12 +43,14 @@ Usage: [1m[36mwt switch[0m [36m[OPTIONS][0m [36m[BRANCH][0m [1m[36m[--
   [36m[EXECUTE_ARGS]...[0m  Additional arguments for --execute command (after --)
 
 [1m[32mOptions:[0m
-  [1m[36m-c[0m, [1m[36m--create[0m             Create a new branch
-  [1m[36m-b[0m, [1m[36m--base[0m[36m [0m[36m<BASE>[0m        Base branch
-  [1m[36m-x[0m, [1m[36m--execute[0m[36m [0m[36m<EXECUTE>[0m  Command to run after switch
-      [1m[36m--clobber[0m            Remove stale paths at target
-      [1m[36m--no-cd[0m              Skip directory change after switching
-  [1m[36m-h[0m, [1m[36m--help[0m               Print help (see more with '--help')
+  [1m[36m-c[0m, [1m[36m--create[0m                 Create a new branch
+  [1m[36m-b[0m, [1m[36m--base[0m[36m [0m[36m<BASE>[0m            Base branch
+  [1m[36m-x[0m, [1m[36m--execute[0m[36m [0m[36m<EXECUTE>[0m      Command to run after switch
+      [1m[36m--clobber[0m                Remove stale paths at target
+      [1m[36m--no-cd[0m                  Skip directory change after switching
+      [1m[36m--init[0m                   Initialize uninitialized submodules before switching
+      [1m[36m--no-recurse-submodules[0m  Skip submodule branch resolution
+  [1m[36m-h[0m, [1m[36m--help[0m                   Print help (see more with '--help')
 
 [1m[32mPicker Options:[0m
       [1m[36m--branches[0m  Include branches without worktrees

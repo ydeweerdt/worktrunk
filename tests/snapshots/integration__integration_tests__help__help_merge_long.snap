@@ -70,6 +70,9 @@ Usage: [1m[36mwt merge[0m [36m[OPTIONS][0m [36m[TARGET][0m
           - [1m[36mtracked[0m: Stage tracked changes only (like [1mgit add -u[0m)
           - [1m[36mnone[0m:    Stage nothing, commit only what's already in the index
 
+      [1m[36m--recurse-submodules[0m
+          Recurse into submodules during merge
+
   [1m[36m-h[0m, [1m[36m--help[0m
           Print help (see a summary with '-h')
 
@@ -173,6 +176,15 @@ The full workflow: start an agent (one of many) on a task, work elsewhere, retur
 [107m [0m [2m[36m[[pre-merge]][0m
 [107m [0m [2mtest = [0m[2m[32m"cargo test"[0m
 [107m [0m [2mlint = [0m[2m[32m"cargo clippy"[0m
+
+[1m[32mSubmodule management[0m
+
+When [2m--recurse-submodules[0m is set, [2mwt merge[0m checks each initialized
+submodule for gitlink changes between the feature and target branches.
+For each modified submodule, the target branch is checked out and the
+feature branch is merged into it, keeping submodule history in sync
+with the parent merge. A merge conflict in a submodule aborts the
+parent merge with a hint for manual resolution.
 
 [1m[32mSee also[0m
 

@@ -205,9 +205,10 @@ The target is a branch, and must already be an ancestor of the current branch. O
 ## Examples
 
 ```console
-$ wt step push             # Fast-forward main to current branch
-$ wt step push develop     # Fast-forward develop instead
-$ wt step push --no-ff     # Merge commit instead of a fast-forward
+$ wt step push                          # Fast-forward main to current branch
+$ wt step push develop                  # Fast-forward develop instead
+$ wt step push --no-ff                  # Merge commit instead of a fast-forward
+$ wt step push --recurse-submodules=yes # Also push submodule changes
 ```
 
 ## Target worktree
@@ -215,6 +216,8 @@ $ wt step push --no-ff     # Merge commit instead of a fast-forward
 When the target branch has a worktree of its own, that worktree's files move to the new commits too. A fast-forward does both at once, pushing into this repository with `receive.denyCurrentBranch=updateInstead`; `--no-ff` moves the ref first and syncs the worktree after, warning rather than failing if that sync doesn't apply. Uncommitted changes in that worktree are stashed for the duration and restored afterward; one touching a file the push also changes is refused instead, naming the file.
 
 A worktree that is still registered but whose directory is gone is refused as well, since nothing can be synced into it — `git worktree prune` clears the registration.
+
+Submodule pushing is disabled by default. Pass `--recurse-submodules=yes` or `--recurse-submodules=check` to enable.
 "#
     )]
     Push {
@@ -231,6 +234,10 @@ A worktree that is still registered but whose directory is gone is refused as we
         /// Allow fast-forward (default)
         #[arg(long, overrides_with = "no_ff", hide = true)]
         ff: bool,
+
+        /// Control submodule push behavior
+        #[arg(long, value_name = "MODE")]
+        recurse_submodules: Option<String>,
 
         /// Output format
         ///
