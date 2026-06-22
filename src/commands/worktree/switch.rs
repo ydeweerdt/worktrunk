@@ -1671,10 +1671,10 @@ impl SwitchPipeline<'_> {
         // gitlink) to each initialized submodule so submodule checkouts match
         // the parent branch. Errors propagate up — the worktree is kept so the
         // user can fix submodule issues manually.
-        if let SwitchResult::Created { path, base_branch, .. } = &result
+        if let SwitchResult::Created { path, .. } = &result
             && !no_recurse_submodules
         {
-            apply_submodule_dwim(repo, path, branch_info.branch.as_deref(), base_branch.as_deref())?;
+            apply_submodule_dwim(repo, path, branch_info.branch.as_deref())?;
         }
 
 
@@ -2117,13 +2117,10 @@ fn apply_submodule_dwim(
     repo: &Repository,
     path: &Path,
     parent_branch: Option<&str>,
-    base_branch: Option<&str>,
 ) -> anyhow::Result<()> {
-    let parent_branch = parent_branch.unwrap_or("");
-    let dwim_branch = base_branch.unwrap_or(parent_branch);
-    if dwim_branch.is_empty() {
+    let Some(dwim_branch) = parent_branch.filter(|b| !b.is_empty()) else {
         return Ok(());
-    }
+    };
 
     let wt = repo.worktree_at(path);
     let head = wt.run_command(&["rev-parse", "HEAD"])?;
