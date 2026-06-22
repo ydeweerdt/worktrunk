@@ -1282,6 +1282,9 @@ fn handle_branch_only_output(
     } else if deletion_mode.is_force() {
         let repo = worktrunk::git::Repository::current()?;
         let result = repo.run_command(&["branch", "-D", "--", branch_name]);
+        if result.is_ok() {
+            worktrunk::git::delete_submodule_branches_if_safe(&repo, branch_name);
+        }
         handle_branch_deletion_result(
             result.map(|_| BranchDeletionResult {
                 outcome: BranchDeletionOutcome::ForceDeleted,
@@ -1987,21 +1990,39 @@ fn handle_removed_worktree_output(
     // picker manages its own cwd). The git removal runs inline — same as the
     // foreground path, minus the chrome.
     if matches!(ctx.execution, RemovalExecution::Silent) {
-        return remove_removed_worktree_silently(&repo, &ctx, announcer);
+        let result = remove_removed_worktree_silently(&repo, &ctx, announcer);
+        prune_submodule_worktrees_best_effort(&repo);
+        return result;
     }
 
     prepare_remove_directory_change(ctx.main_path, ctx.worktree_path, ctx.changed_directory)?;
 
     // Handle detached HEAD case (no branch known)
     let Some(branch_name) = ctx.branch_name else {
-        return handle_detached_removed_worktree_output(&repo, &ctx, announcer);
+        let result = handle_detached_removed_worktree_output(&repo, &ctx, announcer);
+        prune_submodule_worktrees_best_effort(&repo);
+        return result;
     };
 
-    if matches!(ctx.execution, RemovalExecution::Foreground) {
+    let result = if matches!(ctx.execution, RemovalExecution::Foreground) {
         handle_named_removed_worktree_foreground(&repo, &ctx, branch_name, announcer)
     } else {
         handle_named_removed_worktree_background(&repo, &ctx, branch_name, announcer)
-    }
+    };
+    prune_submodule_worktrees_best_effort(&repo);
+    result
+}
+
+/// Run `git submodule foreach --recursive git worktree prune` from the
+/// primary worktree to clean up stale submodule worktree metadata left
+/// behind by the removed worktree. Best-effort — errors are logged but
+/// never propagated to the caller.
+fn prune_submodule_worktrees_best_effort(repo: &Repository) {
+    let Ok(Some(primary_path)) = repo.primary_worktree() else { return };
+    let _ = Cmd::new("git")
+        .args(["submodule", "foreach", "--recursive", "git worktree prune"])
+        .current_dir(&primary_path)
+        .run();
 }
 
 /// Remove a [`RemovalPlan::Worktree`] target with no terminal output — the

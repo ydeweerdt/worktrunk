@@ -68,6 +68,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::git::repository::WorkingTree;
+use crate::git::repository::submodules;
 use crate::git::{IntegrationReason, Repository, WorktreeInfo};
 use crate::shell_exec::Cmd;
 use crate::utils::epoch_now;
@@ -465,6 +466,7 @@ pub fn delete_branch_if_safe(
     // behavior for the Worktree path). The user explicitly chose -D.
     if force_delete {
         repo.run_command(&["branch", "-D", "--", branch_name])?;
+        delete_submodule_branches_if_safe(repo, branch_name);
         return Ok(BranchDeletionResult {
             outcome: BranchDeletionOutcome::ForceDeleted,
             integration_target: target.to_string(),
@@ -518,6 +520,10 @@ pub fn delete_branch_if_safe(
         }
         None => BranchDeletionOutcome::NotDeleted,
     };
+
+    if matches!(outcome, BranchDeletionOutcome::Integrated(_)) {
+        delete_submodule_branches_if_safe(repo, branch_name);
+    }
 
     Ok(BranchDeletionResult {
         outcome,
@@ -599,6 +605,36 @@ fn cas_delete_branch_outcome(
         Ok(BranchDeletionOutcome::RetainedRaced)
     } else {
         Err(update_err)
+    }
+}
+
+/// Delete a matching branch in every initialized submodule.
+///
+/// Called after a parent branch has been successfully deleted. Best-effort:
+/// branches that don't exist or aren't fully merged produce a warning but
+/// never propagate an error to the caller.
+pub fn delete_submodule_branches_if_safe(repo: &Repository, branch_name: &str) {
+    let Ok(Some(primary_path)) = repo.primary_worktree() else { return };
+    let primary_wt = repo.worktree_at(&primary_path);
+    let Ok(head) = primary_wt.run_command(&["rev-parse", "HEAD"]) else { return };
+    let treeish = head.trim().to_string();
+    let Ok(records) = submodules::read_gitmodules(repo, &treeish) else { return };
+
+    for record in &records {
+        let sub_path = &record.path;
+        let submodule_dir = primary_wt.path().join(sub_path);
+        if !submodule_dir.join(".git").exists() {
+            continue; // Not initialized in primary worktree
+        }
+        if let Err(e) = primary_wt.run_command_in_submodule(sub_path, &["branch", "-d", branch_name])
+        {
+            log::debug!(
+                "Submodule '{}' branch '{}' not deleted: {}",
+                sub_path,
+                branch_name,
+                e
+            );
+        }
     }
 }
 
