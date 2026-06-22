@@ -78,6 +78,7 @@ pub use remove::{
     stage_worktree_removal, stop_fsmonitor_daemon,
 };
 pub use repository::sha_cache;
+pub use repository::submodules;
 pub use repository::{
     Branch, BranchDiffSpec, CommitMessageDetail, InProgressOperation, IntegrationTargets,
     RefSnapshot, Repository, ResolvedWorktree, TempIndex, WorkingTree, duplicated_branches,

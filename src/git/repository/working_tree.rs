@@ -165,7 +165,7 @@ impl<'a> WorkingTree<'a> {
         &self.path
     }
 
-    /// Run a git command in this worktree and return stdout.
+    /// Run a git command in the worktree and return stdout.
     pub fn run_command(&self, args: &[&str]) -> anyhow::Result<String> {
         let output = self.run_command_output(args)?;
 
@@ -191,6 +191,40 @@ impl<'a> WorkingTree<'a> {
             )
             .run()
             .with_context(|| format!("Failed to execute: git {}", args.join(" ")))
+    }
+
+    /// Run a git command in a submodule of this worktree and return stdout.
+    ///
+    /// `sub_path` is the submodule path relative to this worktree's root
+    /// (e.g. `"lib/auth"`).  The command runs in that submodule's checkout
+    /// directory.
+    pub fn run_command_in_submodule(
+        &self,
+        sub_path: &str,
+        args: &[&str],
+    ) -> anyhow::Result<String> {
+        let submodule_dir = self.path.join(sub_path);
+        let output = Cmd::new("git")
+            .args(args.iter().copied())
+            .current_dir(&submodule_dir)
+            .context(sub_path)
+            .run()
+            .with_context(|| {
+                format!(
+                    "Failed to execute in submodule '{}': git {}",
+                    sub_path,
+                    args.join(" ")
+                )
+            })?;
+
+        if !output.status.success() {
+            return Err(
+                crate::git::CommandError::from_failed_output("git", args, &output).into(),
+            );
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        Ok(stdout)
     }
 
     // =========================================================================

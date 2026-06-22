@@ -23,6 +23,7 @@ use worktrunk::git::remote_ref::{
 use worktrunk::git::{
     ForgeKind, GitError, GitRemoteUrl, RefType, Repository, SwitchSuggestionCtx, current_or_recover,
 };
+use worktrunk::git::submodules;
 use worktrunk::shell_exec::{ShellEscapeMode, directive_shell_escape_mode, shell_escape_for};
 use worktrunk::styling::{
     eprintln, format_with_gutter, hint_message, info_message, progress_message, suggest_command,
@@ -1341,6 +1342,8 @@ struct SwitchOptions<'a> {
     change_dir: Option<bool>,
     verify: bool,
     format: crate::cli::SwitchFormat,
+    init: bool,
+    no_recurse_submodules: bool,
 }
 
 /// Run pre-switch hooks before branch resolution or worktree creation.
@@ -1585,6 +1588,10 @@ pub(crate) struct SwitchPipeline<'a> {
     /// Binary name for the shell-integration offer. `Some` only on the argument
     /// path; the picker does not offer shell integration.
     pub shell_integration_binary: Option<&'a str>,
+    /// Run `git submodule update --init --recursive` after creating the worktree.
+    pub init: bool,
+    /// Skip submodule DWIM even when submodules are present.
+    pub no_recurse_submodules: bool,
 }
 
 impl SwitchPipeline<'_> {
@@ -1607,6 +1614,8 @@ impl SwitchPipeline<'_> {
             execute,
             execute_args,
             shell_integration_binary,
+            init,
+            no_recurse_submodules,
         } = self;
 
         // Offer to fix worktree-path for bare repos with hidden directory names
@@ -1660,6 +1669,19 @@ impl SwitchPipeline<'_> {
         // Execute the validated plan.
         let (result, branch_info) =
             execute_switch(repo, plan, config, yes, hooks_approved, &hook_plan)?;
+
+        // Submodule DWIM: after creating a new worktree, apply the three-rule
+        // branch resolution (checkout local, create from remote, create from
+        // gitlink) to each initialized submodule so submodule checkouts match
+        // the parent branch. Errors propagate up — the worktree is kept so the
+        // user can fix submodule issues manually.
+        if let SwitchResult::Created { path, base_branch, .. } = &result
+            && !no_recurse_submodules
+        {
+            apply_submodule_dwim(repo, path, branch_info.branch.as_deref(), base_branch.as_deref(), init)?;
+        }
+
+
 
         // --format=json: write structured result to stdout. All behavior
         // (hooks, --execute, shell integration) proceeds normally — format only
@@ -1815,6 +1837,8 @@ fn run_switch(
         change_dir: change_dir_flag,
         verify,
         format,
+        init,
+        no_recurse_submodules,
     } = opts;
 
     let (repo, is_recovered) = current_or_recover().context("Failed to switch worktree")?;
@@ -1853,6 +1877,8 @@ fn run_switch(
         execute,
         execute_args,
         shell_integration_binary: Some(binary_name),
+        init,
+        no_recurse_submodules,
     }
     .run()
 }
@@ -1900,6 +1926,8 @@ pub fn handle_switch_command(args: SwitchArgs, yes: bool) -> anyhow::Result<()> 
                     change_dir: change_dir_flag,
                     verify,
                     format: args.format,
+                    init: args.init,
+                    no_recurse_submodules: args.no_recurse_submodules,
                 },
                 &mut config,
                 &crate::binary_name(),
@@ -2085,8 +2113,63 @@ fn validate_switch_templates(
 
     Ok(())
 }
+/// Apply submodule DWIM after a new worktree is created.
+///
+/// Reads `.gitmodules` from the new worktree's HEAD, then for each
+/// initialized submodule resolves the matching branch using the parent
+/// branch name and applies it (checkout local, create from remote, or
+/// create from gitlink commit). Errors propagate up — the worktree is
+/// kept so the user can fix issues manually.
+fn apply_submodule_dwim(
+    repo: &Repository,
+    path: &Path,
+    parent_branch: Option<&str>,
+    base_branch: Option<&str>,
+    init: bool,
+) -> anyhow::Result<()> {
+    let parent_branch = parent_branch.unwrap_or("");
+    let dwim_branch = base_branch.unwrap_or(parent_branch);
+    if dwim_branch.is_empty() {
+        return Ok(());
+    }
+
+    let wt = repo.worktree_at(path);
+    let head = wt.run_command(&["rev-parse", "HEAD"])?;
+    let treeish = head.trim().to_string();
+    let records = submodules::read_gitmodules(repo, &treeish)?;
+    if records.is_empty() {
+        return Ok(());
+    }
+
+    // Pre-flight: check all submodules before mutating any
+    for record in &records {
+        let gitlink = submodules::gitlink_commit(repo, &treeish, &record.path);
+        match &gitlink {
+            Ok(sha) => {
+                submodules::preflight_check(&wt, &record.path, dwim_branch, sha, init)?;
+            }
+            Err(_) => continue, // Not a submodule at this tree
+        }
+    }
+
+    // Apply DWIM to each initialized submodule
+    for record in &records {
+        let gitlink = match submodules::gitlink_commit(repo, &treeish, &record.path) {
+            Ok(sha) => sha,
+            Err(_) => continue,
+        };
+        let dwim = match submodules::resolve_dwim(&wt, &record.path, dwim_branch, &gitlink) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let _prev = submodules::apply_dwim(&wt, &record.path, &dwim)?;
+    }
+
+    Ok(())
+}
 
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use worktrunk::testing::TestRepo;

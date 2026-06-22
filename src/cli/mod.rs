@@ -428,6 +428,14 @@ pub(crate) struct SwitchArgs {
     #[arg(long, overrides_with = "no_cd", hide = true)]
     pub(crate) cd: bool,
 
+    /// Initialize uninitialized submodules before switching
+    #[arg(long, requires = "branch")]
+    pub(crate) init: bool,
+
+    /// Skip submodule branch resolution
+    #[arg(long = "no-recurse-submodules", requires = "branch")]
+    pub(crate) no_recurse_submodules: bool,
+
     #[command(flatten)]
     pub(crate) hooks: HookFlags,
 
@@ -748,6 +756,18 @@ Requires `gh` (GitHub), `glab` (GitLab), or an equivalent CLI installed and auth
 - **Stale directory** — Use `--clobber` to remove a non-worktree directory at the target path
 
 To change which branch a worktree is on, use `git switch` inside that worktree.
+
+## Submodule management
+
+When creating a worktree with initialized submodules, the matching branch in
+each submodule is resolved using the same DWIM rules as the parent:
+
+1. **Local branch exists** — checks it out as-is
+2. **Remote-tracking branch exists** — creates a local branch tracking the remote ref
+3. **Neither exists** — creates a new branch from the parent's gitlink commit
+
+Use `--no-recurse-submodules` to skip all submodule operations. Use `--init`
+to auto-initialize uninitialized submodules.
 
 ## See also
 

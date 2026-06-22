@@ -138,6 +138,18 @@ Requires `gh` (GitHub), `glab` (GitLab), or an equivalent CLI installed and auth
 
 To change which branch a worktree is on, use `git switch` inside that worktree.
 
+## Submodule management
+
+When creating a worktree with initialized submodules, the matching branch in
+each submodule is resolved using the same DWIM rules as the parent:
+
+1. **Local branch exists** — checks it out as-is
+2. **Remote-tracking branch exists** — creates a local branch tracking the remote ref
+3. **Neither exists** — creates a new branch from the parent's gitlink commit
+
+Use `--no-recurse-submodules` to skip all submodule operations. Use `--init`
+to auto-initialize uninitialized submodules.
+
 ## See also
 
 - [`wt list`](@/list.md) — View all worktrees
@@ -208,6 +220,12 @@ Usage: <b><span class=c>wt switch</span></b> <span class=c>[OPTIONS]</span> <spa
 
           Hooks still run normally. Useful when hooks handle navigation (e.g., tmux workflows) or
           for CI/automation. Use --cd to override.
+
+      <b><span class=c>--init</span></b>
+          Initialize uninitialized submodules before switching
+
+      <b><span class=c>--no-recurse-submodules</span></b>
+          Skip submodule branch resolution
 
   <b><span class=c>-h</span></b>, <b><span class=c>--help</span></b>
           Print help (see a summary with &#39;-h&#39;)

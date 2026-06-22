@@ -156,6 +156,7 @@ mod integration;
 mod ref_snapshot;
 mod remotes;
 pub mod sha_cache;
+pub mod submodules;
 mod working_tree;
 mod worktrees;
 
