@@ -90,6 +90,15 @@ test = "cargo test"
 lint = "cargo clippy"
 ```
 
+## Submodule management
+
+When `--recurse-submodules` is set, `wt merge` checks each initialized
+submodule for gitlink changes between the feature and target branches.
+For each modified submodule, the target branch is checked out and the
+feature branch is merged into it, keeping submodule history in sync
+with the parent merge. A merge conflict in a submodule aborts the
+parent merge with a hint for manual resolution.
+
 ## Command reference
 
 ```
@@ -128,6 +137,9 @@ Options:
           - all:     Stage everything: untracked files + unstaged tracked changes
           - tracked: Stage tracked changes only (like git add -u)
           - none:    Stage nothing, commit only what's already in the index
+
+      --recurse-submodules
+          Recurse into submodules during merge
 
   -h, --help
           Print help (see a summary with '-h')

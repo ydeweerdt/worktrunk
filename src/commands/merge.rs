@@ -5,6 +5,7 @@ use color_print::cformat;
 use worktrunk::HookType;
 use worktrunk::config::{MergeConfig, UserConfig};
 use worktrunk::git::Repository;
+use worktrunk::git::submodules;
 use worktrunk::styling::{eprintln, info_message};
 
 use super::command_approval::approve_commit_template_append;
@@ -29,6 +30,7 @@ pub struct MergeFlagOverrides {
     pub remove: Option<bool>,
     pub ff: Option<bool>,
     pub verify: Option<bool>,
+    pub recurse_submodules: bool,
 }
 
 impl MergeFlagOverrides {
@@ -40,6 +42,7 @@ impl MergeFlagOverrides {
             remove: flag_pair(args.remove, args.no_remove),
             ff: flag_pair(args.ff, args.no_ff),
             verify: flag_pair(args.verify, args.no_hooks || args.no_verify),
+            recurse_submodules: args.recurse_submodules,
         }
     }
 
@@ -52,6 +55,7 @@ impl MergeFlagOverrides {
             remove: self.remove.unwrap_or(config.remove()),
             ff: self.ff.unwrap_or(config.ff()),
             verify: self.verify.unwrap_or(config.verify()),
+            recurse_submodules: self.recurse_submodules,
         }
     }
 }
@@ -63,6 +67,7 @@ pub struct ResolvedMergeFlags {
     pub remove: bool,
     pub ff: bool,
     pub verify: bool,
+    pub recurse_submodules: bool,
 }
 
 /// Options for the merge command. `flags` carries tri-state CLI overrides for
@@ -190,6 +195,7 @@ pub fn handle_merge(opts: MergeOptions<'_>) -> anyhow::Result<()> {
         remove,
         ff,
         verify,
+        recurse_submodules,
     } = flags.resolve(&resolved.merge);
     let stage_mode = stage.unwrap_or(resolved.commit.stage());
 
@@ -419,6 +425,54 @@ pub fn handle_merge(opts: MergeOptions<'_>) -> anyhow::Result<()> {
             FailureStrategy::FailFast,
             crate::output::pre_hook_display_path(ctx.worktree_path),
         )?;
+    }
+
+    // Recursive submodule merge: after rebase but before the parent merge,
+    // for each initialized submodule whose gitlink differs between the
+    // feature and target branches, merge the feature branch into the
+    // submodule's target branch.
+    if recurse_submodules {
+        let feature_head = repo.run_command(&["rev-parse", "HEAD"])?;
+        let feature_treeish = feature_head.trim().to_string();
+        let target_treeish = repo.run_command(&["rev-parse", &target_branch])?;
+        let target_treeish = target_treeish.trim().to_string();
+        let records = submodules::read_gitmodules(repo, &feature_treeish)?;
+
+        for record in &records {
+            let sub_path = &record.path;
+            let feature_gitlink = submodules::gitlink_commit(repo, &feature_treeish, sub_path);
+            let Ok(feature_gitlink) = feature_gitlink else { continue };
+            let target_gitlink = submodules::gitlink_commit(repo, &target_treeish, sub_path);
+            let Ok(target_gitlink) = target_gitlink else { continue };
+            if feature_gitlink == target_gitlink {
+                continue;
+            }
+            // Submodule not initialized in feature worktree — skip
+            if !feature_root.join(sub_path).join(".git").exists() {
+                continue;
+            }
+            // Switch to target branch in submodule (create from gitlink if not exists)
+            let switch_result = current_wt.run_command_in_submodule(
+                sub_path,
+                &["switch", &target_branch],
+            );
+            if switch_result.is_err() {
+                current_wt.run_command_in_submodule(
+                    sub_path,
+                    &["switch", "-c", &target_branch, &target_gitlink],
+                )?;
+            }
+            // Merge the feature branch into the submodule's target branch
+            current_wt.run_command_in_submodule(sub_path, &["merge", &current_branch])
+                .with_context(|| {
+                    format!(
+                        "Submodule '{}' merge conflict. Abort the parent merge with \
+                         `git merge --abort` in the parent repo, resolve the submodule \
+                         conflict manually, then retry `wt merge`.",
+                        sub_path
+                    )
+                })?;
+        }
     }
 
     // Merge to target branch

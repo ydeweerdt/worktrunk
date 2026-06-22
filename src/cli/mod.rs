@@ -607,6 +607,10 @@ pub(crate) struct MergeArgs {
     /// JSON prints structured result to stdout after merge completes.
     #[arg(long, default_value = "text", help_heading = "Automation")]
     pub(crate) format: SwitchFormat,
+
+    /// Recurse into submodules during merge
+    #[arg(long)]
+    pub(crate) recurse_submodules: bool,
 }
 
 // Ordering: by "core-ness". Primitive worktree operations first (switch, list,
@@ -1452,6 +1456,15 @@ The full workflow: start an agent (one of many) on a task, work elsewhere, retur
 test = "cargo test"
 lint = "cargo clippy"
 ```
+
+## Submodule management
+
+When `--recurse-submodules` is set, `wt merge` checks each initialized
+submodule for gitlink changes between the feature and target branches.
+For each modified submodule, the target branch is checked out and the
+feature branch is merged into it, keeping submodule history in sync
+with the parent merge. A merge conflict in a submodule aborts the
+parent merge with a hint for manual resolution.
 
 ## See also
 
