@@ -282,6 +282,28 @@ pub fn initialized_submodule_names(
     Ok(result)
 }
 
+/// If the submodule's HEAD currently points to `branch`, detach it so
+/// `git worktree add branch` doesn't refuse ("branch is already checked out").
+fn detach_if_current(gitdir_str: &str, branch: &str) {
+    let current_head = Cmd::new("git")
+        .args([
+            "--git-dir",
+            gitdir_str,
+            "symbolic-ref",
+            "--short",
+            "HEAD",
+        ])
+        .run()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string());
+    if current_head.as_deref() == Some(branch) {
+        let _ = Cmd::new("git")
+            .args(["--git-dir", gitdir_str, "checkout", "--detach"])
+            .run();
+    }
+}
+
 /// Apply a DWIM result by creating a linked worktree in the submodule.
 ///
 /// Uses `git --git-dir=<modules>/<name> worktree add <path> <branch>` so the
@@ -307,6 +329,7 @@ pub fn apply_dwim(
 
     match result {
         DwimResult::CheckoutLocal(branch) => {
+            detach_if_current(&gitdir_str, branch);
             Cmd::new("git")
                 .args([
                     "--git-dir",
@@ -340,6 +363,7 @@ pub fn apply_dwim(
                         branch, sub_name
                     )
                 })?;
+            detach_if_current(&gitdir_str, branch);
             Cmd::new("git")
                 .args([
                     "--git-dir",
@@ -373,6 +397,7 @@ pub fn apply_dwim(
                         branch, sub_name
                     )
                 })?;
+            detach_if_current(&gitdir_str, branch);
             Cmd::new("git")
                 .args([
                     "--git-dir",
